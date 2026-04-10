@@ -16,3 +16,4 @@ kagglehub
 
 # Библиотека для создания веб-интерфейса
 streamlit
+gdown
