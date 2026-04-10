@@ -17,3 +17,7 @@ kagglehub
 # Библиотека для создания веб-интерфейса
 streamlit
 gdown
+
+#Работа с сетевыми данными
+requests
+BytesIO
