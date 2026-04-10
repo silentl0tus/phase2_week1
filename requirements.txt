@@ -6,6 +6,8 @@ torchvision>=0.15.0
 Pillow
 tqdm
 numpy
+matplotlib
+seaborn
 
 # Работа с датасетами Kaggle (если планируете скачивать данные на лету)
 kagglehub
