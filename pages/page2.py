@@ -33,7 +33,19 @@ def load_full_model():
     model.eval()
     return model
 
-# ✅ ИСПРАВЛЕНО: убраны аргументы
+# --- ФУНКЦИЯ ЗАГРУЗКИ КАРТИНКИ ПО ССЫЛКЕ ---
+def load_image_from_url(url):
+    """Загружает картинку по URL и возвращает объект PIL Image"""
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        img = Image.open(BytesIO(response.content)).convert('RGB')
+        return img
+    except Exception as e:
+        st.error(f"Ошибка загрузки картинки: {e}")
+        return None
+
+# ✅ Загрузка модели
 model = load_full_model()  # <-- было load_full_model(FILE_ID, SAVE_PATH)
 preprocess = get_preprocess()
 
@@ -42,44 +54,62 @@ preprocess = get_preprocess()
 st.title("🌾 Определение растений по фото")
 st.write("Загрузите фото растения, и модель определит его вид")
 
-uploaded_file = st.file_uploader("Выберите фото (JPG, PNG)", type=["jpg", "jpeg", "png"])
+upload_method = st.radio(
+    "Выберите способ загрузки фото:",
+    ["📁 Загрузить файл", "🔗 Ссылка на фото"]
+)
 
-# Список названий классов
-names = ['Cherry', 'Coffee-plant', 'Cucumber', 'Fox_nut(Makhana)', 'Lemon',
-         'Olive-tree', 'Pearl_millet(bajra)', 'Tobacco-plant', 'almond', 'banana',
-         'cardamom', 'chilli', 'clove', 'coconut', 'cotton',
-         'gram', 'jowar', 'jute', 'maize', 'mustard-oil',
-         'papaya', 'pineapple', 'rice', 'soyabean', 'sugarcane',
-         'sunflower', 'tea', 'tomato', 'vigna-radiati(Mung)', 'wheat']
+image = None
 
-if uploaded_file:
-    # Отображение картинки
-    image = Image.open(uploaded_file).convert('RGB')
-    st.image(image, caption='Ваше изображение', use_container_width=True)
-    
+# Способ 1: Загрузка файла
+if upload_method == "📁 Загрузить файл":
+    uploaded_file = st.file_uploader("Выберите фото (JPG, PNG)", type=["jpg", "jpeg", "png"])
+    if uploaded_file:
+        image = Image.open(uploaded_file).convert('RGB')
+        st.image(image, caption='Ваше изображение', use_container_width=True)
+
+# Способ 2: Ссылка на фото
+else:
+    url = st.text_input("Введите ссылку на фото:", placeholder="https://example.com/photo.jpg")
+    if url:
+        if st.button("📥 Загрузить по ссылке"):
+            with st.spinner("Загружаю фото..."):
+                image = load_image_from_url(url)
+            if image:
+                st.image(image, caption='Загруженное изображение', use_container_width=True)
+                st.success("Фото успешно загружено!")
+
+# --- РАСПОЗНАВАНИЕ ---
+if image is not None:
     if st.button("🚀 Запустить распознавание"):
-        # Проверка, что модель загружена
         if model is None:
-            st.error("Модель не загружена. Проверьте файл весов.")
+            st.error("Модель не загружена")
         else:
             with st.spinner("Распознаю растение..."):
-                # Превращаем картинку в тензор (с добавлением батч-размерности)
                 img_tensor = preprocess(image).unsqueeze(0)
-                
                 with torch.no_grad():
                     output = model(img_tensor)
-                    # Получаем вероятности для всех классов
-                    probabilities = torch.nn.functional.softmax(output[0], dim=0)
-                    # Берем индекс самого вероятного класса
                     predicted_idx = torch.argmax(output, 1).item()
-                    confidence = probabilities[predicted_idx].item()
                     
+                    # Получаем уверенность модели
+                    probabilities = torch.nn.functional.softmax(output[0], dim=0)
+                    confidence = probabilities[predicted_idx].item()
+            
+            # Названия классов на русском
+            names = ['Вишня', 'Кофейное дерево', 'Огурец', 'Фокс-нат (Махана)', 'Лимон',
+                     'Оливковое дерево', 'Жемчужное просо (баджра)', 'Табак', 'Миндаль', 'Банан',
+                     'Кардамон', 'Перец чили', 'Гвоздика', 'Кокос', 'Хлопок',
+                     'Нут', 'Сорго', 'Джут', 'Кукуруза', 'Горчица',
+                     'Папайя', 'Ананас', 'Рис', 'Соя', 'Сахарный тростник',
+                     'Подсолнечник', 'Чай', 'Томат', 'Маш (бобы мунг)', 'Пшеница']
+            
             # Вывод результата
-            st.success(f"**Результат:** {names[predicted_idx]}")
+            st.success(f"**🌿 Результат:** {names[predicted_idx]}")
             st.info(f"📊 Уверенность модели: {confidence:.2%}")
             
-            # Дополнительно показываем топ-3 наиболее вероятных класса
+            # Показываем топ-3 альтернативы
             top3_prob, top3_idx = torch.topk(probabilities, 3)
-            st.write("**Альтернативные варианты:**")
+            st.write("**🔍 Альтернативные варианты:**")
             for i in range(3):
-                st.write(f"- {names[top3_idx[i]]}: {top3_prob[i].item():.2%}")
+                if top3_idx[i] != predicted_idx:  # Не показываем основной результат повторно
+                    st.write(f"- {names[top3_idx[i]]}: {top3_prob[i].item():.2%}")
