@@ -54,19 +54,56 @@ CLASS_NAMES = ['Benign (Доброкачественное)', 'Malignant (Зло
 # ============================================
 @st.cache_resource
 def load_my_model():
-    """Загружает ВАШУ модель"""
+    """Загружает ВАШУ модель с обработкой разных форматов"""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     model = MySkinCancerModel(num_classes=2)
     
     if MODEL_PATH.exists():
-        checkpoint = torch.load(MODEL_PATH, map_location=device)
-        if 'model_state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['model_state_dict'])
-        else:
-            model.load_state_dict(checkpoint)
-        st.sidebar.success(f"✅ Модель загружена (Эпоха {MY_METRICS['epoch']})")
+        try:
+            # Загружаем файл с весами
+            checkpoint = torch.load(MODEL_PATH, map_location=device)
+            
+            # Определяем, в каком формате сохранены веса
+            if isinstance(checkpoint, dict):
+                if 'model_state_dict' in checkpoint:
+                    state_dict = checkpoint['model_state_dict']
+                    st.sidebar.info("📦 Загружен формат: model_state_dict")
+                elif 'state_dict' in checkpoint:
+                    state_dict = checkpoint['state_dict']
+                    st.sidebar.info("📦 Загружен формат: state_dict")
+                else:
+                    # Возможно, сам словарь - это и есть веса
+                    state_dict = checkpoint
+                    st.sidebar.info("📦 Загружен формат: прямой словарь весов")
+            else:
+                state_dict = checkpoint
+            
+            # Убираем префикс 'module.' если модель обучалась на нескольких GPU
+            new_state_dict = {}
+            for key, value in state_dict.items():
+                new_key = key.replace('module.', '')  # Убираем префикс DataParallel
+                new_state_dict[new_key] = value
+            
+            # Загружаем веса с проверкой совместимости
+            missing_keys, unexpected_keys = model.load_state_dict(new_state_dict, strict=False)
+            
+            # Показываем информацию о загрузке
+            if missing_keys:
+                st.sidebar.warning(f"⚠️ Отсутствующие слои: {len(missing_keys)}")
+                print(f"Missing keys: {missing_keys[:5]}")  # Первые 5 для отладки
+            if unexpected_keys:
+                st.sidebar.warning(f"⚠️ Лишние слои: {len(unexpected_keys)}")
+                print(f"Unexpected keys: {unexpected_keys[:5]}")
+            
+            st.sidebar.success(f"✅ Модель загружена (Эпоха {MY_METRICS['epoch']})")
+            
+        except Exception as e:
+            st.sidebar.error(f"❌ Ошибка при загрузке: {str(e)}")
+            st.sidebar.warning("⚠️ Используется непредобученная модель")
     else:
+        st.sidebar.warning(f"⚠️ Файл модели не найден по пути:")
+        st.sidebar.warning(f"   {MODEL_PATH}")
         st.sidebar.warning("⚠️ Используется непредобученная модель")
     
     model.eval()
