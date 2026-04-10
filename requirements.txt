@@ -20,4 +20,3 @@ gdown
 
 #Работа с сетевыми данными
 requests
-BytesIO
