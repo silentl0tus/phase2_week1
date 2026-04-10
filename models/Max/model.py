@@ -38,68 +38,13 @@ import os
 from tqdm import tqdm
 
 import kagglehub
+import torch
+import torch.nn as nn
+from torchvision import models
 
-# Download latest version
-path = kagglehub.dataset_download("puneet6060/intel-image-classification")
-
-print("Path to dataset files:", path)
-
-# Настройка устройства
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print(f"Using device: {device}")
-
-BATCH_SIZE = 32
-EPOCHS = 10
-LEARNING_RATE = 0.001
-NUM_CLASSES = 6  # Intel датасет имеет 6 классов
-IMAGE_SIZE = 224
-
-DATA_PATH = path
-
-transform_train = transforms.Compose([
-    transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
-    transforms.RandomHorizontalFlip(p=0.5),
-    transforms.RandomRotation(15),
-    transforms.ColorJitter(brightness=0.2, contrast=0.2),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                        std=[0.229, 0.224, 0.225])
-])
-
-transform_val = transforms.Compose([
-    transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                        std=[0.229, 0.224, 0.225])
-])
-
-# Загрузка датасета
-train_dataset = datasets.ImageFolder(
-    root=os.path.join(DATA_PATH, 'seg_train/seg_train'),
-    transform=transform_train
-)
-
-val_dataset = datasets.ImageFolder(
-    root=os.path.join(DATA_PATH, 'seg_test/seg_test'),
-    transform=transform_val
-)
-
-# Создание DataLoader'ов
-train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
-val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
-
-print(f"Training samples: {len(train_dataset)}")
-print(f"Validation samples: {len(val_dataset)}")
-print(f"Classes: {train_dataset.classes}")
-
-# Создание модели
-def create_model(num_classes):
-    # Загружаем предобученную модель ResNet50
-    model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
-    # Замораживаем все слои
-    for param in model.parameters():
-        param.requires_grad = False
-    # Заменяем последний полносвязный слой
+def create_model(num_classes=6):
+    # Ваша исходная архитектура
+    model = models.resnet50(weights=None) # weights=None, так как загрузим ваши
     num_features = model.fc.in_features
     model.fc = nn.Sequential(
         nn.Dropout(0.2),
@@ -108,146 +53,221 @@ def create_model(num_classes):
         nn.Dropout(0.2),
         nn.Linear(256, num_classes)
     )
-    # Размораживаем только новый классификационный слой
-    for param in model.fc.parameters():
-        param.requires_grad = True
-
     return model
 
-# Инициализация модели
-model = create_model(NUM_CLASSES)
-model = model.to(device)
+def get_resnet50_model(num_classes):
+    return create_model(num_classes)
 
-# Функция потерь и оптимизатор
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.fc.parameters(), lr=LEARNING_RATE)  # оптимизируем только fc слой
-scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
+# Download latest version
+if __name__ == "__main__":
+    path = kagglehub.dataset_download("puneet6060/intel-image-classification")
 
-# Функция для обучения одной эпохи
-def train_epoch(model, loader, criterion, optimizer):
-    model.train()
-    running_loss = 0.0
-    correct = 0
-    total = 0
+    print("Path to dataset files:", path)
 
-    for inputs, labels in tqdm(loader, desc="Training"):
-        inputs, labels = inputs.to(device), labels.to(device)
+    # Настройка устройства
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
 
-        optimizer.zero_grad()
-        outputs = model(inputs)
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
+    BATCH_SIZE = 32
+    EPOCHS = 10
+    LEARNING_RATE = 0.001
+    NUM_CLASSES = 6  # Intel датасет имеет 6 классов
+    IMAGE_SIZE = 224
 
-        running_loss += loss.item()
-        _, predicted = outputs.max(1)
-        total += labels.size(0)
-        correct += predicted.eq(labels).sum().item()
+    DATA_PATH = path
 
-    epoch_loss = running_loss / len(loader)
-    epoch_acc = 100. * correct / total
-    return epoch_loss, epoch_acc
+    transform_train = transforms.Compose([
+        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomRotation(15),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225])
+    ])
 
-# Функция для валидации
-def validate(model, loader, criterion):
-    model.eval()
-    running_loss = 0.0
-    correct = 0
-    total = 0
+    transform_val = transforms.Compose([
+        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225])
+    ])
 
-    with torch.no_grad():
-        for inputs, labels in tqdm(loader, desc="Validation"):
+    # Загрузка датасета
+    train_dataset = datasets.ImageFolder(
+        root=os.path.join(DATA_PATH, 'seg_train/seg_train'),
+        transform=transform_train
+    )
+
+    val_dataset = datasets.ImageFolder(
+        root=os.path.join(DATA_PATH, 'seg_test/seg_test'),
+        transform=transform_val
+    )
+
+    # Создание DataLoader'ов
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
+    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
+
+    print(f"Training samples: {len(train_dataset)}")
+    print(f"Validation samples: {len(val_dataset)}")
+    print(f"Classes: {train_dataset.classes}")
+
+    # Создание модели
+    def create_model(num_classes):
+        # Загружаем предобученную модель ResNet50
+        model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
+        # Замораживаем все слои
+        for param in model.parameters():
+            param.requires_grad = False
+        # Заменяем последний полносвязный слой
+        num_features = model.fc.in_features
+        model.fc = nn.Sequential(
+            nn.Dropout(0.2),
+            nn.Linear(num_features, 256),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(256, num_classes)
+        )
+        # Размораживаем только новый классификационный слой
+        for param in model.fc.parameters():
+            param.requires_grad = True
+
+        return model
+
+    # Инициализация модели
+    model = create_model(NUM_CLASSES)
+    model = model.to(device)
+
+    # Функция потерь и оптимизатор
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.fc.parameters(), lr=LEARNING_RATE)  # оптимизируем только fc слой
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
+
+    # Функция для обучения одной эпохи
+    def train_epoch(model, loader, criterion, optimizer):
+        model.train()
+        running_loss = 0.0
+        correct = 0
+        total = 0
+
+        for inputs, labels in tqdm(loader, desc="Training"):
             inputs, labels = inputs.to(device), labels.to(device)
+
+            optimizer.zero_grad()
             outputs = model(inputs)
             loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
 
             running_loss += loss.item()
             _, predicted = outputs.max(1)
             total += labels.size(0)
             correct += predicted.eq(labels).sum().item()
 
-    epoch_loss = running_loss / len(loader)
-    epoch_acc = 100. * correct / total
-    return epoch_loss, epoch_acc
+        epoch_loss = running_loss / len(loader)
+        epoch_acc = 100. * correct / total
+        return epoch_loss, epoch_acc
 
-# Основной цикл обучения
-print("Starting training...")
-best_acc = 0.0
+    # Функция для валидации
+    def validate(model, loader, criterion):
+        model.eval()
+        running_loss = 0.0
+        correct = 0
+        total = 0
 
-for epoch in range(EPOCHS):
-    print(f"\nEpoch {epoch+1}/{EPOCHS}")
-    print("-" * 50)
+        with torch.no_grad():
+            for inputs, labels in tqdm(loader, desc="Validation"):
+                inputs, labels = inputs.to(device), labels.to(device)
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
 
-    train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer)
-    val_loss, val_acc = validate(model, val_loader, criterion)
+                running_loss += loss.item()
+                _, predicted = outputs.max(1)
+                total += labels.size(0)
+                correct += predicted.eq(labels).sum().item()
 
-    scheduler.step()
+        epoch_loss = running_loss / len(loader)
+        epoch_acc = 100. * correct / total
+        return epoch_loss, epoch_acc
 
-    print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%")
-    print(f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%")
+    # Основной цикл обучения
+    print("Starting training...")
+    best_acc = 0.0
 
-    # Сохраняем лучшую модель
-    if val_acc > best_acc:
-        best_acc = val_acc
-        torch.save({
+    for epoch in range(EPOCHS):
+        print(f"\nEpoch {epoch+1}/{EPOCHS}")
+        print("-" * 50)
+
+        train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer)
+        val_loss, val_acc = validate(model, val_loader, criterion)
+
+        scheduler.step()
+
+        print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%")
+        print(f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%")
+
+        # Сохраняем лучшую модель
+        if val_acc > best_acc:
+            best_acc = val_acc
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'val_acc': val_acc,
+                'classes': train_dataset.classes
+            }, 'best_model.pth')
+            print(f"Saved best model with val_acc: {val_acc:.2f}%")
+
+    print(f"\nTraining completed! Best validation accuracy: {best_acc:.2f}%")
+
+    # Функция для предсказания на одном изображении
+    def predict_image(model, image_path, transform, classes):
+        model.eval()
+        image = Image.open(image_path).convert('RGB')
+        image = transform(image).unsqueeze(0).to(device)
+
+        with torch.no_grad():
+            outputs = model(image)
+            probabilities = torch.nn.functional.softmax(outputs, dim=1)
+            confidence, predicted = torch.max(probabilities, 1)
+
+        return classes[predicted.item()], confidence.item()
+
+    # Загрузка сохраненной модели
+    def load_model(model_path, num_classes, device):
+        model = create_model(num_classes)
+        checkpoint = torch.load(model_path, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.to(device)
+        return model, checkpoint['classes']
+
+    # Пример использования сохраненной модели
+    # model, classes = load_model('best_model.pth', NUM_CLASSES, device)
+    # predicted_class, confidence = predict_image(model, 'test_image.jpg', transform_val, classes)
+    # print(f"Predicted: {predicted_class}, Confidence: {confidence:.3f}")
+
+    # Способ 1: Сохранение только весов (рекомендуемый для Kaggle)
+    def save_model_for_kaggle(model, filepath='model_weights.pth'):
+        """Сохраняет только веса модели (наименьший размер)"""
+        torch.save(model.state_dict(), filepath)
+        print(f"Model weights saved to {filepath}")
+
+    # Способ 2: Сохранение полного чекпоинта (с метаданными)
+    def save_full_checkpoint(model, optimizer, epoch, val_acc, classes, filepath='full_model_checkpoint.pth'):
+        """Сохраняет модель с дополнительной информацией"""
+        checkpoint = {
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'val_acc': val_acc,
-            'classes': train_dataset.classes
-        }, 'best_model.pth')
-        print(f"Saved best model with val_acc: {val_acc:.2f}%")
+            'classes': classes,
+            'model_architecture': 'resnet50',
+            'num_classes': len(classes),
+            'input_size': 224
+        }
+        torch.save(checkpoint, filepath)
+        print(f"Full checkpoint saved to {"/content/drive/MyDrive/Colab Notebooks/model_weights.pth"}")
 
-print(f"\nTraining completed! Best validation accuracy: {best_acc:.2f}%")
+    torch.save(model.state_dict(),'/content/drive/MyDrive/Colab_project/model_weights.pth')
 
-# Функция для предсказания на одном изображении
-def predict_image(model, image_path, transform, classes):
-    model.eval()
-    image = Image.open(image_path).convert('RGB')
-    image = transform(image).unsqueeze(0).to(device)
-
-    with torch.no_grad():
-        outputs = model(image)
-        probabilities = torch.nn.functional.softmax(outputs, dim=1)
-        confidence, predicted = torch.max(probabilities, 1)
-
-    return classes[predicted.item()], confidence.item()
-
-# Загрузка сохраненной модели
-def load_model(model_path, num_classes, device):
-    model = create_model(num_classes)
-    checkpoint = torch.load(model_path, map_location=device)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model.to(device)
-    return model, checkpoint['classes']
-
-# Пример использования сохраненной модели
-# model, classes = load_model('best_model.pth', NUM_CLASSES, device)
-# predicted_class, confidence = predict_image(model, 'test_image.jpg', transform_val, classes)
-# print(f"Predicted: {predicted_class}, Confidence: {confidence:.3f}")
-
-# Способ 1: Сохранение только весов (рекомендуемый для Kaggle)
-def save_model_for_kaggle(model, filepath='model_weights.pth'):
-    """Сохраняет только веса модели (наименьший размер)"""
-    torch.save(model.state_dict(), filepath)
-    print(f"Model weights saved to {filepath}")
-
-# Способ 2: Сохранение полного чекпоинта (с метаданными)
-def save_full_checkpoint(model, optimizer, epoch, val_acc, classes, filepath='full_model_checkpoint.pth'):
-    """Сохраняет модель с дополнительной информацией"""
-    checkpoint = {
-        'epoch': epoch,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'val_acc': val_acc,
-        'classes': classes,
-        'model_architecture': 'resnet50',
-        'num_classes': len(classes),
-        'input_size': 224
-    }
-    torch.save(checkpoint, filepath)
-    print(f"Full checkpoint saved to {"/content/drive/MyDrive/Colab Notebooks/model_weights.pth"}")
-
-torch.save(model.state_dict(),'/content/drive/MyDrive/Colab_project/model_weights.pth')
-
-torch.save(model.state_dict(),'/content/drive/MyDrive/Colab_project/intel-image-classification.py')
+    torch.save(model.state_dict(),'/content/drive/MyDrive/Colab_project/intel-image-classification.py')
