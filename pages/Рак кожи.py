@@ -1,156 +1,366 @@
 import streamlit as st
 import torch
-import gdown
-import os
-import sys
-import requests
+import torch.nn as nn
+from torchvision import transforms, models
 from PIL import Image
+import numpy as np
+import plotly.graph_objects as go
+from pathlib import Path
 
-# 1. Поднимаемся на уровень выше, чтобы видеть папку models
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-# 2. Импортируем из папки models (имя_папки.имя_файла)
-from models.resnet import MyResNet, get_preprocess
-
-# --- ДАЛЕЕ ВАШ КОД ---
-FILE_ID = '10u-lzjpiuDFeaguYs-9dZVp0vcPIsdop'
-SAVE_PATH = 'model_weights.pth'
-
-@st.cache_resource
-def load_full_model():
-    save_path = 'model_weights.pth'
-    if not os.path.exists(save_path):
-        # Ссылка на файл из GitHub Release
-        url = "https://github.com/silentl0tus/phase2_week1/releases/download/v_1.0/plants_resnet50_final.pth"
-        response = requests.get(url, stream=True)
-        with open(save_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-    
-    model = MyResNet(num_classes=30)
-    state_dict = torch.load(save_path, map_location='cpu')
-    model.load_state_dict(state_dict)
-    model.eval()
-    return model
-
-# --- ФУНКЦИЯ ЗАГРУЗКИ КАРТИНКИ ПО ССЫЛКЕ ---
-def load_image_from_url(url):
-    """Загружает картинку по URL и возвращает объект PIL Image"""
-    try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        img = Image.open(BytesIO(response.content)).convert('RGB')
-        return img
-    except Exception as e:
-        st.error(f"Ошибка загрузки картинки: {e}")
-        return None
-
-# ✅ Загрузка модели
-model = load_full_model()  # <-- было load_full_model(FILE_ID, SAVE_PATH)
-preprocess = get_preprocess()
-
-
-# --- ИНТЕРФЕЙС СТРИМЛИТ ---
-st.title("🌾 Определение растений по фото")
-st.write("Загрузите фото растения, и модель определит его вид")
-
-PLANT_NAMES_RU = [
-    '🍒 Вишня', '☕ Кофейное дерево', '🥒 Огурец', '🥜 Фокс-нат (Махана)', '🍋 Лимон',
-    '🫒 Оливковое дерево', '🌾 Жемчужное просо (баджра)', '🚬 Табак', '🌰 Миндаль', '🍌 Банан',
-    '🌿 Кардамон', '🌶️ Перец чили', '🌸 Гвоздика', '🥥 Кокос', '🌱 Хлопок',
-    '🫘 Нут', '🌽 Сорго', '🧵 Джут', '🌽 Кукуруза', '🫒 Горчица',
-    '🍈 Папайя', '🍍 Ананас', '🍚 Рис', '🫘 Соя', '🎋 Сахарный тростник',
-    '🌻 Подсолнечник', '🍵 Чай', '🍅 Томат', '🫘 Маш (бобы мунг)', '🌾 Пшеница'
-]
-
-
-# Боковая панель с информацией
-with st.sidebar:
-    st.header("📚 О приложении")
-    st.markdown("""
-    Это приложение использует нейронную сеть **ResNet50**, обученную на датасете из 30 классов растений.
-    
-    **Что умеет:**
-    - Распознавать 30 видов растений
-    - Показывать уверенность в определении
-    - Предлагать альтернативные варианты
-    """)
-    
-    st.header("🌱 Список распознаваемых растений")
-    
-    # Разбиваем список на две колонки для удобства
-    col1, col2 = st.columns(2)
-    
-    # Разделяем список пополам
-    half = len(PLANT_NAMES_RU) // 2
-    with col1:
-        for plant in PLANT_NAMES_RU[:half]:
-            st.write(plant)
-    with col2:
-        for plant in PLANT_NAMES_RU[half:]:
-            st.write(plant)
-
-    st.caption(f"📊 Всего растений: **{len(PLANT_NAMES_RU)}**")
-    
-    st.divider()
-    st.info("💡 **Совет:** Чем чётче фото, тем точнее результат!")
-
-upload_method = st.radio(
-    "Выберите способ загрузки фото:",
-    ["📁 Загрузить файл", "🔗 Ссылка на фото"]
+# ============================================
+# КОНФИГУРАЦИЯ СТРАНИЦЫ
+# ============================================
+st.set_page_config(
+    page_title="Skin Cancer Classifier",
+    page_icon="🔬",
+    layout="wide"
 )
 
-image = None
+# ============================================
+# ВАША АРХИТЕКТУРА МОДЕЛИ
+# ============================================
+class MySkinCancerModel(nn.Module):
+    """Ваша собственная модель"""
+    def __init__(self, num_classes=2):
+        super().__init__()
+        self.backbone = models.resnet50(weights=None)
+        num_features = self.backbone.fc.in_features
+        self.backbone.fc = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(num_features, num_classes)
+        )
+    
+    def forward(self, x):
+        return self.backbone(x)
 
-# Способ 1: Загрузка файла
-if upload_method == "📁 Загрузить файл":
-    uploaded_file = st.file_uploader("Выберите фото (JPG, PNG)", type=["jpg", "jpeg", "png"])
-    if uploaded_file:
-        image = Image.open(uploaded_file).convert('RGB')
-        st.image(image, caption='Ваше изображение', use_container_width=True)
+# ============================================
+# ПУТИ И МЕТРИКИ
+# ============================================
+MODEL_PATH = Path(__file__).parent.parent / "models" / "my_skin_cancer_model.pth"
 
-# Способ 2: Ссылка на фото
-else:
-    url = st.text_input("Введите ссылку на фото:", placeholder="https://example.com/photo.jpg")
-    if url:
-        if st.button("📥 Загрузить по ссылке"):
-            with st.spinner("Загружаю фото..."):
-                image = load_image_from_url(url)
-            if image:
-                st.image(image, caption='Загруженное изображение', use_container_width=True)
-                st.success("Фото успешно загружено!")
+MY_METRICS = {
+    'accuracy': 0.9076,
+    'sensitivity': 0.8967,
+    'specificity': 0.9167,
+    'epoch': 12,
+    'train_samples': 2637,
+    'test_samples': 660
+}
 
-# --- РАСПОЗНАВАНИЕ ---
-if image is not None:
-    if st.button("🚀 Запустить распознавание"):
-        if model is None:
-            st.error("Модель не загружена")
+CLASS_NAMES = ['Benign (Доброкачественное)', 'Malignant (Злокачественное)']
+
+# ============================================
+# ЗАГРУЗКА МОДЕЛИ
+# ============================================
+@st.cache_resource
+def load_my_model():
+    """Загружает ВАШУ модель с обработкой разных форматов"""
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    model = MySkinCancerModel(num_classes=2)
+    
+    if MODEL_PATH.exists():
+        try:
+            # Загружаем файл с весами
+            checkpoint = torch.load(MODEL_PATH, map_location=device)
+            
+            # Определяем, в каком формате сохранены веса
+            if isinstance(checkpoint, dict):
+                if 'model_state_dict' in checkpoint:
+                    state_dict = checkpoint['model_state_dict']
+                    st.sidebar.info("📦 Загружен формат: model_state_dict")
+                elif 'state_dict' in checkpoint:
+                    state_dict = checkpoint['state_dict']
+                    st.sidebar.info("📦 Загружен формат: state_dict")
+                else:
+                    # Возможно, сам словарь - это и есть веса
+                    state_dict = checkpoint
+                    st.sidebar.info("📦 Загружен формат: прямой словарь весов")
+            else:
+                state_dict = checkpoint
+            
+            # Убираем префикс 'module.' если модель обучалась на нескольких GPU
+            new_state_dict = {}
+            for key, value in state_dict.items():
+                new_key = key.replace('module.', '')  # Убираем префикс DataParallel
+                new_state_dict[new_key] = value
+            
+            # Загружаем веса с проверкой совместимости
+            missing_keys, unexpected_keys = model.load_state_dict(new_state_dict, strict=False)
+            
+            # Показываем информацию о загрузке
+            if missing_keys:
+                st.sidebar.warning(f"⚠️ Отсутствующие слои: {len(missing_keys)}")
+                print(f"Missing keys: {missing_keys[:5]}")  # Первые 5 для отладки
+            if unexpected_keys:
+                st.sidebar.warning(f"⚠️ Лишние слои: {len(unexpected_keys)}")
+                print(f"Unexpected keys: {unexpected_keys[:5]}")
+            
+            st.sidebar.success(f"✅ Модель загружена (Эпоха {MY_METRICS['epoch']})")
+            
+        except Exception as e:
+            st.sidebar.error(f"❌ Ошибка при загрузке: {str(e)}")
+            st.sidebar.warning("⚠️ Используется непредобученная модель")
+    else:
+        st.sidebar.warning(f"⚠️ Файл модели не найден по пути:")
+        st.sidebar.warning(f"   {MODEL_PATH}")
+        st.sidebar.warning("⚠️ Используется непредобученная модель")
+    
+    model.eval()
+    model.to(device)
+    
+    return model, device
+
+# ============================================
+# ТРАНСФОРМАЦИИ
+# ============================================
+def get_transform():
+    return transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+
+# ============================================
+# ПРЕДСКАЗАНИЕ
+# ============================================
+def predict(image, model, device):
+    transform = get_transform()
+    img_tensor = transform(image).unsqueeze(0).to(device)
+    
+    with torch.no_grad():
+        outputs = model(img_tensor)
+        probabilities = torch.softmax(outputs, dim=1)
+        prediction = torch.argmax(outputs, dim=1).item()
+    
+    probs = probabilities[0].cpu().numpy()
+    
+    return CLASS_NAMES[prediction], probs, prediction
+
+# ============================================
+# ВИЗУАЛИЗАЦИЯ
+# ============================================
+def plot_probabilities(probs):
+    fig = go.Figure(data=[
+        go.Bar(
+            x=['Benign', 'Malignant'],
+            y=probs,
+            text=[f'{p:.1%}' for p in probs],
+            textposition='auto',
+            marker_color=['#2ecc71', '#e74c3c'],
+            opacity=0.8
+        )
+    ])
+    
+    fig.update_layout(
+        title="Вероятности классов",
+        yaxis_title="Вероятность",
+        yaxis_tickformat='.0%',
+        height=350,
+        showlegend=False,
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)'
+    )
+    
+    return fig
+
+def plot_gauge(value, title, color):
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=value * 100,
+        title={'text': title, 'font': {'size': 14}},
+        number={'suffix': '%', 'font': {'size': 20}},
+        gauge={
+            'axis': {'range': [0, 100]},
+            'bar': {'color': color},
+            'steps': [
+                {'range': [0, 50], 'color': '#ffebee'},
+                {'range': [50, 75], 'color': '#fff3e0'},
+                {'range': [75, 90], 'color': '#e8f5e9'},
+                {'range': [90, 100], 'color': '#c8e6c9'}
+            ]
+        }
+    ))
+    fig.update_layout(height=200)
+    return fig
+
+# ============================================
+# CSS СТИЛИ
+# ============================================
+def local_css():
+    st.markdown("""
+    <style>
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: 600;
+        color: #1f2937;
+        margin-bottom: 0.5rem;
+    }
+    .sub-header {
+        font-size: 1.2rem;
+        color: #6b7280;
+        margin-bottom: 2rem;
+    }
+    .result-box {
+        padding: 25px;
+        border-radius: 15px;
+        margin: 20px 0;
+        text-align: center;
+    }
+    .benign {
+        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        color: white;
+    }
+    .malignant {
+        background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
+        color: white;
+    }
+    .result-text {
+        font-size: 2rem;
+        font-weight: bold;
+        margin-bottom: 10px;
+    }
+    .confidence-text {
+        font-size: 1.2rem;
+        opacity: 0.9;
+    }
+    .metric-card {
+        background: #f8f9fa;
+        border-radius: 10px;
+        padding: 15px;
+        text-align: center;
+    }
+    .metric-value {
+        font-size: 1.5rem;
+        font-weight: bold;
+    }
+    .metric-label {
+        font-size: 0.85rem;
+        color: #6b7280;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# ============================================
+# ОСНОВНОЙ КОНТЕНТ
+# ============================================
+def main():
+    local_css()
+    
+    st.markdown('<h1 class="main-header">🔬 Мой Skin Cancer Classifier</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Классификация: Benign vs Malignant | ResNet50 + Transfer Learning</p>', unsafe_allow_html=True)
+    
+    # Загружаем модель
+    model, device = load_my_model()
+    
+    # ============================================
+    # SIDEBAR
+    # ============================================
+    with st.sidebar:
+        st.markdown("### 📊 Метрики моей модели")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("🎯 Accuracy", f"{MY_METRICS['accuracy']*100:.1f}%")
+            st.metric("🔬 Sensitivity", f"{MY_METRICS['sensitivity']*100:.1f}%")
+        with col2:
+            st.metric("✅ Specificity", f"{MY_METRICS['specificity']*100:.1f}%")
+            st.metric("📈 Эпоха", MY_METRICS['epoch'])
+        
+        st.markdown("---")
+        st.markdown("### 🏗️ Архитектура")
+        st.markdown("""
+        - **Backbone**: ResNet50
+        - **Transfer Learning**: ImageNet
+        - **Разморожен**: Layer4 + FC
+        - **Dropout**: 0.5
+        """)
+        
+        st.markdown("---")
+        st.markdown("### 📚 Данные")
+        st.markdown(f"""
+        - **Train**: {MY_METRICS['train_samples']} изображений
+        - **Test**: {MY_METRICS['test_samples']} изображений
+        - **Классы**: Benign / Malignant
+        """)
+        
+        st.markdown("---")
+        st.markdown("### ⚠️ Дисклеймер")
+        st.info(
+            "Модель предназначена для исследовательских целей. "
+            "Не является медицинским диагнозом."
+        )
+    
+    # ============================================
+    # ОСНОВНАЯ ОБЛАСТЬ
+    # ============================================
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.markdown("### 📤 Загрузите изображение")
+        
+        uploaded_file = st.file_uploader(
+            "Выберите дерматоскопическое изображение",
+            type=['jpg', 'jpeg', 'png', 'bmp']
+        )
+        
+        if uploaded_file:
+            image = Image.open(uploaded_file).convert('RGB')
+            st.image(image, caption="Загруженное изображение", use_container_width=True)
+            
+            if st.button("🔍 Анализировать", type="primary", use_container_width=True):
+                with st.spinner("Анализ..."):
+                    prediction, probs, pred_class = predict(image, model, device)
+                    st.session_state['prediction'] = prediction
+                    st.session_state['probs'] = probs
+                    st.session_state['pred_class'] = pred_class
+    
+    with col2:
+        st.markdown("### 📊 Результаты")
+        
+        if 'prediction' in st.session_state:
+            prediction = st.session_state['prediction']
+            probs = st.session_state['probs']
+            pred_class = st.session_state['pred_class']
+            
+            box_class = 'benign' if pred_class == 0 else 'malignant'
+            confidence = probs[pred_class]
+            
+            st.markdown(f"""
+            <div class="result-box {box_class}">
+                <div class="result-text">{prediction}</div>
+                <div class="confidence-text">Уверенность: {confidence:.1%}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            fig = plot_probabilities(probs)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-value" style="color: #2ecc71;">{probs[0]:.1%}</div>
+                    <div class="metric-label">Benign</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with col_b:
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-value" style="color: #e74c3c;">{probs[1]:.1%}</div>
+                    <div class="metric-label">Malignant</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            if pred_class == 1 and confidence > 0.7:
+                st.warning("⚠️ Высокая вероятность злокачественного образования. Рекомендуется консультация дерматолога.")
+            elif pred_class == 1:
+                st.info("ℹ️ Признаки требуют внимания. Рекомендуется консультация специалиста.")
         else:
-            with st.spinner("Распознаю растение..."):
-                img_tensor = preprocess(image).unsqueeze(0)
-                with torch.no_grad():
-                    output = model(img_tensor)
-                    predicted_idx = torch.argmax(output, 1).item()
-                    
-                    # Получаем уверенность модели
-                    probabilities = torch.nn.functional.softmax(output[0], dim=0)
-                    confidence = probabilities[predicted_idx].item()
-            
-            # Названия классов на русском
-            names = ['Вишня', 'Кофейное дерево', 'Огурец', 'Фокс-нат (Махана)', 'Лимон',
-                     'Оливковое дерево', 'Жемчужное просо (баджра)', 'Табак', 'Миндаль', 'Банан',
-                     'Кардамон', 'Перец чили', 'Гвоздика', 'Кокос', 'Хлопок',
-                     'Нут', 'Сорго', 'Джут', 'Кукуруза', 'Горчица',
-                     'Папайя', 'Ананас', 'Рис', 'Соя', 'Сахарный тростник',
-                     'Подсолнечник', 'Чай', 'Томат', 'Маш (бобы мунг)', 'Пшеница']
-            
-            # Вывод результата
-            st.success(f"**🌿 Результат:** {names[predicted_idx]}")
-            st.info(f"📊 Уверенность модели: {confidence:.2%}")
-            
-            # Показываем топ-3 альтернативы
-            top3_prob, top3_idx = torch.topk(probabilities, 3)
-            st.write("**🔍 Альтернативные варианты:**")
-            for i in range(3):
-                if top3_idx[i] != predicted_idx:  # Не показываем основной результат повторно
-                    st.write(f"- {names[top3_idx[i]]}: {top3_prob[i].item():.2%}")
+            st.info("👆 Загрузите изображение и нажмите 'Анализировать'")
+
+# ============================================
+# ЗАПУСК
+# ============================================
+if __name__ == "__main__":
+    main()
